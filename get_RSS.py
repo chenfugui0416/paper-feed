@@ -28,6 +28,18 @@ OUTPUT_FILE = "filtered_feed.xml"
 MAX_ITEMS = 1000
 # ----------------
 
+def get_repo_url():
+    """Infer the public repository URL for the generated feed metadata."""
+    if os.environ.get("RSS_REPO_URL"):
+        return os.environ["RSS_REPO_URL"]
+
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if repo:
+        server = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+        return f"{server}/{repo}"
+
+    return "https://github.com/your_username/your_repo"
+
 def load_config(filename, env_var_name=None):
     """(保持你之前的 load_config 代码不变)"""
     # ... 请保留你之前为了隐私修改过的 load_config 函数 ...
@@ -181,7 +193,7 @@ def generate_rss_xml(items):
 
     feed = Feed(
         title = "My Customized Papers",
-        link = "https://github.com/your_username/your_repo",
+        link = get_repo_url(),
         description = "Aggregated research papers",
         language = "en-US",
         lastBuildDate = datetime.datetime.now(),
