@@ -28,6 +28,7 @@ jobs:
 
     - name: Run RSS Script
       env: 
+        RSS_JOURNALS: ${{ secrets.RSS_JOURNALS }}
         RSS_KEYWORDS: ${{ secrets.RSS_KEYWORDS }}
       run: python get_RSS.py
 
@@ -35,7 +36,7 @@ jobs:
       run: |
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        git add filtered_feed.xml
+        git add filtered_feed.xml feeds/*.xml
         # 只有当有新文件生成或文件变动时才提交
         git commit -m "Auto-update RSS feed" || echo "No changes to commit"
         git push
