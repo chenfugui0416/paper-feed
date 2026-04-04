@@ -13,11 +13,13 @@
 
 ## 🛠 功能特性
 
-*   **全自动运行**：无需服务器，利用 GitHub Actions 每 8 小时自动执行一次检索。
+*   **全自动运行**：无需服务器，利用 GitHub Actions 每 6 小时自动执行一次检索。
 *   **多维度检索**：支持简单的关键词匹配及 `Keyword A AND Keyword B` 的组合逻辑检索。
 *   **数据清洗**：内置 XML 字符清洗程序，自动移除非法字符，确保订阅源的兼容性与稳定性。
 *   **隐私保护**：支持通过 GitHub Secrets 注入配置，隐藏用户的研究领域与关注列表。
-*   **通用兼容**：生成的 `filtered_feed.xml` 遵循 RSS 2.0 标准，适配所有主流 RSS 阅读器。
+*   **多订阅输出**：除旧版总订阅 `filtered_feed.xml` 外，还会生成 `AI核心`、`热点追踪`、`创新交叉` 3 个独立 RSS。
+*   **重点标记**：高优先级论文会在分类订阅标题前显示 `【精选S】` 或 `【精选A】`。
+*   **通用兼容**：生成的 RSS 遵循 RSS 2.0 标准，适配 Zotero 和其他主流 RSS 阅读器。
 
 ---
 
@@ -57,13 +59,28 @@
 
 ## 📈 客户端接入 (以 Zotero 为例)
 
-1.  **获取订阅链接**：
-    `https://{你的GitHub用户名}.github.io/{仓库名}/filtered_feed.xml`
+当前仓库的可用订阅地址如下：
+
+- 论文总订阅（兼容旧订阅）：
+  `https://chenfugui0416.github.io/paper-feed/filtered_feed.xml`
+- AI核心：
+  `https://chenfugui0416.github.io/paper-feed/feeds/ai_core.xml`
+- 热点追踪：
+  `https://chenfugui0416.github.io/paper-feed/feeds/hot_now.xml`
+- 创新交叉：
+  `https://chenfugui0416.github.io/paper-feed/feeds/innovation_cross.xml`
+
+如果你 fork 到自己的账号，请将上面的域名替换为：
+`https://{你的GitHub用户名}.github.io/{仓库名}/...`
+
+1.  **选择订阅方式**：
+    *   想保留原有体验：订阅 `filtered_feed.xml`
+    *   想在 Zotero 里分方向阅读：分别添加 3 个分类订阅
 2.  **添加订阅**：
     *   Zotero 菜单栏：`文件` -> `新建文献库` -> `新建订阅` -> `从网址`。
-    *   粘贴上述链接。
+    *   粘贴任一上述链接。
 3.  **设置同步频率**：
-    *   建议在 Zotero 订阅设置中将更新时间设为 **8小时** 或更短，以匹配后端的更新频率。
+    *   建议在 Zotero 订阅设置中将更新时间设为 **6小时** 或更短，以匹配后端的更新频率。
 
 ---
 

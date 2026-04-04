@@ -1,18 +1,19 @@
-import feedparser
-import re
-import os
 import datetime
-import time
-from rfeed import Item, Feed, Guid, Serializable
-from email.utils import parsedate_to_datetime
-from journal_map import get_abbr, clean_title
+import os
+import re
+from pathlib import Path
+
+import feedparser
+from rfeed import Feed, Guid, Item, Serializable
+
+from classifier_rules import classify_entry
+from journal_map import clean_title, get_abbr
 
 
 class DcSource(Serializable):
     """
     rfeed extension that writes <dc:source>value</dc:source> into an RSS item.
-    Zotero reads this as the publicationTitle (出版物) field.
-    The dc namespace (xmlns:dc=...) is already declared by rfeed's Feed._get_attributes().
+    Zotero reads this as the publicationTitle field.
     """
 
     def __init__(self, source):
@@ -23,10 +24,29 @@ class DcSource(Serializable):
         Serializable.publish(self, handler)
         self._write_element("dc:source", self.source)
 
-# --- 配置区域 ---
-OUTPUT_FILE = "filtered_feed.xml"
+
+LEGACY_OUTPUT_FILE = Path("filtered_feed.xml")
+OUTPUT_DIR = Path("feeds")
 MAX_ITEMS = 1000
-# ----------------
+LEGACY_FEED_TITLE = "论文总订阅"
+FEED_DEFINITIONS = {
+    "ai_core": {
+        "title": "AI核心",
+        "description": "AI相关论文订阅",
+        "path": OUTPUT_DIR / "ai_core.xml",
+    },
+    "hot_now": {
+        "title": "热点追踪",
+        "description": "近期热点论文订阅",
+        "path": OUTPUT_DIR / "hot_now.xml",
+    },
+    "innovation_cross": {
+        "title": "创新交叉",
+        "description": "跨学科创新论文订阅",
+        "path": OUTPUT_DIR / "innovation_cross.xml",
+    },
+}
+
 
 def get_repo_url():
     """Infer the public repository URL for the generated feed metadata."""
@@ -40,182 +60,233 @@ def get_repo_url():
 
     return "https://github.com/your_username/your_repo"
 
+
 def load_config(filename, env_var_name=None):
-    """(保持你之前的 load_config 代码不变)"""
-    # ... 请保留你之前为了隐私修改过的 load_config 函数 ...
-    # 这里为了篇幅省略，请直接复用你现在的 load_config
+    """Load line-based configuration from an env var or local file."""
     if env_var_name and os.environ.get(env_var_name):
         print(f"Loading config from environment variable: {env_var_name}")
         content = os.environ[env_var_name]
-        if '\n' in content:
-            return [line.strip() for line in content.split('\n') if line.strip()]
-        else:
-            return [line.strip() for line in content.split(';') if line.strip()]
-            
+        if "\n" in content:
+            return [line.strip() for line in content.split("\n") if line.strip()]
+        return [line.strip() for line in content.split(";") if line.strip()]
+
     if os.path.exists(filename):
         print(f"Loading config from local file: {filename}")
-        with open(filename, 'r', encoding='utf-8') as f:
-            return [line.strip() for line in f if line.strip() and not line.startswith('#')]
-            
+        with open(filename, "r", encoding="utf-8") as handle:
+            return [
+                line.strip()
+                for line in handle
+                if line.strip() and not line.startswith("#")
+            ]
+
     return []
 
-# --- 新增：XML 非法字符清洗函数 ---
+
 def remove_illegal_xml_chars(text):
-    """
-    移除 XML 1.0 不支持的 ASCII 控制字符 (Char value 0-8, 11-12, 14-31)
-    """
+    """Remove XML 1.0 unsupported ASCII control characters."""
     if not text:
         return ""
-    # 正则表达式：匹配 ASCII 0-8, 11, 12, 14-31 这些控制字符
-    # \x09是tab, \x0a是换行, \x0d是回车，这些是合法的，所以不删
-    illegal_chars = r'[\x00-\x08\x0b\x0c\x0e-\x1f]'
-    return re.sub(illegal_chars, '', text)
+    illegal_chars = r"[\x00-\x08\x0b\x0c\x0e-\x1f]"
+    return re.sub(illegal_chars, "", text)
+
 
 def convert_struct_time_to_datetime(struct_time):
     if not struct_time:
         return datetime.datetime.now()
-    return datetime.datetime.fromtimestamp(time.mktime(struct_time))
+    try:
+        return datetime.datetime(
+            struct_time.tm_year,
+            struct_time.tm_mon,
+            struct_time.tm_mday,
+            struct_time.tm_hour,
+            struct_time.tm_min,
+            struct_time.tm_sec,
+        )
+    except (AttributeError, OverflowError, ValueError):
+        return datetime.datetime.now()
+
 
 def parse_rss(rss_url, retries=3):
-    # (保持不变)
     print(f"Fetching: {rss_url}...")
-    for attempt in range(retries):
+    for _ in range(retries):
         try:
             feed = feedparser.parse(rss_url)
             entries = []
-            journal_title = feed.feed.get('title', 'Unknown Journal')
-            
+            journal_title = feed.feed.get("title", "Unknown Journal")
+
             for entry in feed.entries:
-                pub_struct = entry.get('published_parsed', entry.get('updated_parsed'))
+                pub_struct = entry.get("published_parsed", entry.get("updated_parsed"))
                 pub_date = convert_struct_time_to_datetime(pub_struct)
-                
-                entries.append({
-                    'title': entry.get('title', ''),
-                    'link': entry.get('link', ''),
-                    'pub_date': pub_date,
-                    'summary': entry.get('summary', entry.get('description', '')),
-                    'journal': journal_title,
-                    'id': entry.get('id', entry.get('link', ''))
-                })
+                entries.append(
+                    {
+                        "title": entry.get("title", ""),
+                        "link": entry.get("link", ""),
+                        "pub_date": pub_date,
+                        "summary": entry.get("summary", entry.get("description", "")),
+                        "journal": journal_title,
+                        "id": entry.get("id", entry.get("link", "")),
+                    }
+                )
             return entries
-        except Exception as e:
-            print(f"Error parsing {rss_url}: {e}")
+        except Exception as exc:
+            print(f"Error parsing {rss_url}: {exc}")
             time.sleep(2)
     return []
 
+
 def get_existing_items():
-    # (保持不变，但增加容错：如果 XML 坏了，就返回空列表重新抓)
-    if not os.path.exists(OUTPUT_FILE):
+    """Load accumulated items from the legacy aggregate feed."""
+    if not LEGACY_OUTPUT_FILE.exists():
         return []
-    
-    print(f"Loading existing items from {OUTPUT_FILE}...")
+
+    print(f"Loading existing items from {LEGACY_OUTPUT_FILE}...")
     try:
-        feed = feedparser.parse(OUTPUT_FILE)
-        # 如果解析出错（比如现在的 invalid char），feedparser 可能会拿到空或者 bozo 标志
-        if hasattr(feed, 'bozo') and feed.bozo == 1:
-             print("Warning: Existing XML file might be corrupted. Ignoring old items.")
-             # 这里可以选择 return [] 直接丢弃坏掉的旧数据，重新开始
-             # return [] 
-             # 或者尝试读取能读的部分（取决于损坏位置）
-        
+        feed = feedparser.parse(str(LEGACY_OUTPUT_FILE))
+        if getattr(feed, "bozo", 0) == 1:
+            print("Warning: Existing XML file might be corrupted. Ignoring old items.")
+
         entries = []
         for entry in feed.entries:
-            pub_struct = entry.get('published_parsed')
+            pub_struct = entry.get("published_parsed")
             pub_date = convert_struct_time_to_datetime(pub_struct)
-            
-            entries.append({
-                'title': entry.get('title', ''),
-                'link': entry.get('link', ''),
-                'pub_date': pub_date,
-                'summary': entry.get('summary', ''),
-                'journal': entry.get('dc_source', '') or entry.get('author', ''),
-                'id': entry.get('id', entry.get('link', '')),
-                'is_old': True
-            })
+            entries.append(
+                {
+                    "title": entry.get("title", ""),
+                    "link": entry.get("link", ""),
+                    "pub_date": pub_date,
+                    "summary": entry.get("summary", ""),
+                    "journal": entry.get("dc_source", "") or entry.get("author", ""),
+                    "id": entry.get("id", entry.get("link", "")),
+                    "is_old": True,
+                }
+            )
         return entries
-    except Exception as e:
-        print(f"Error reading existing file: {e}")
-        return [] # 如果旧文件读不了，就当做第一次运行
+    except Exception as exc:
+        print(f"Error reading existing file: {exc}")
+        return []
+
 
 def match_entry(entry, queries):
-    # (保持不变)
-    text_to_search = (entry['title'] + " " + entry['summary']).lower()
+    text_to_search = (entry["title"] + " " + entry["summary"]).lower()
     for query in queries:
-        keywords = [k.strip().lower() for k in query.split('AND')]
-        match = True
-        for keyword in keywords:
-            if keyword not in text_to_search:
-                match = False
-                break
-        if match:
+        keywords = [keyword.strip().lower() for keyword in query.split("AND")]
+        if all(keyword in text_to_search for keyword in keywords):
             return True
     return False
 
-def generate_rss_xml(items):
-    """生成 RSS 2.0 XML 文件 (已加入非法字符清洗)"""
+
+def format_display_title(title, quality_label):
+    if not quality_label:
+        return title
+    if title.startswith("【精选"):
+        return title
+    return f"【精选{quality_label}】{title}"
+
+
+def normalize_item_title(item, include_quality_label=False):
+    raw_journal = item["journal"]
+    item_title = clean_title(item["title"], raw_journal)
+    if include_quality_label:
+        item_title = format_display_title(item_title, item.get("quality_label"))
+    return remove_illegal_xml_chars(item_title)
+
+
+def normalize_item_source(item):
+    return remove_illegal_xml_chars(get_abbr(item["journal"]))
+
+
+def build_rss_items(items, include_quality_label=False):
     rss_items = []
-    
-    items.sort(key=lambda x: x['pub_date'], reverse=True)
-    items = items[:MAX_ITEMS]
-    
-    for item in items:
-        raw_journal = item['journal']
+    sorted_items = sorted(items, key=lambda item: item["pub_date"], reverse=True)[:MAX_ITEMS]
 
-        if not item.get('is_old', False):
-            # 新抓取条目：标题原样来自 RSS，格式为 "[journal_prefix] [ASAP] 论文标题"
-            # 1. 清理标题中的期刊前缀
-            item_title = clean_title(item['title'], raw_journal)
-            # 2. 将 journal 字段映射为标准缩写
-            item_author = get_abbr(raw_journal)
-        else:
-            # 旧条目：标题在上一轮已被写成 "[journal] 论文标题" 的格式（历史逻辑），
-            # 用 raw_journal 清理前缀，确保本轮重新写入时格式干净。
-            item_title = clean_title(item['title'], raw_journal)
-            # 对于已存储的旧条目，author 字段存的是上一轮写入的值，
-            # 尝试再映射一次以确保格式统一
-            item_author = get_abbr(raw_journal)
-
-        # --- 关键修改：清洗非法 XML 字符 ---
-        item_title   = remove_illegal_xml_chars(item_title)
-        clean_summary = remove_illegal_xml_chars(item['summary'])
-        item_author  = remove_illegal_xml_chars(item_author)
-        # ------------------------------------
-
-        rss_item = Item(
-            title = item_title,
-            link = item['link'],
-            description = clean_summary,
-            guid = Guid(item['id']),
-            pubDate = item['pub_date'],
-            extensions = [DcSource(item_author)]
+    for item in sorted_items:
+        rss_items.append(
+            Item(
+                title=normalize_item_title(item, include_quality_label=include_quality_label),
+                link=item["link"],
+                description=remove_illegal_xml_chars(item["summary"]),
+                guid=Guid(item["id"]),
+                pubDate=item["pub_date"],
+                extensions=[DcSource(normalize_item_source(item))],
+            )
         )
-        rss_items.append(rss_item)
+    return rss_items
+
+
+def generate_rss_xml(
+    items,
+    output_path,
+    feed_title,
+    description,
+    include_quality_label=False,
+):
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     feed = Feed(
-        title = "My Customized Papers",
-        link = get_repo_url(),
-        description = "Aggregated research papers",
-        language = "en-US",
-        lastBuildDate = datetime.datetime.now(),
-        items = rss_items
+        title=feed_title,
+        link=get_repo_url(),
+        description=description,
+        language="zh-CN",
+        lastBuildDate=datetime.datetime.now(),
+        items=build_rss_items(items, include_quality_label=include_quality_label),
     )
 
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        f.write(feed.rss())
-    print(f"Successfully generated {OUTPUT_FILE} with {len(rss_items)} items.")
+    output_path.write_text(feed.rss(), encoding="utf-8")
+    print(f"Successfully generated {output_path} with {min(len(items), MAX_ITEMS)} items.")
+
+
+def bucket_entries(entries, now=None):
+    buckets = {name: [] for name in FEED_DEFINITIONS}
+    for entry in entries:
+        classification = classify_entry(entry, now=now)
+        enriched_entry = {
+            **entry,
+            "quality_label": classification["quality_label"],
+            "quality_score": classification["quality_score"],
+            "ai_score": classification["ai_score"],
+            "hot_score": classification["hot_score"],
+            "innovation_score": classification["innovation_score"],
+        }
+        if classification["in_ai_core"]:
+            buckets["ai_core"].append(enriched_entry.copy())
+        if classification["in_hot_now"]:
+            buckets["hot_now"].append(enriched_entry.copy())
+        if classification["in_innovation_cross"]:
+            buckets["innovation_cross"].append(enriched_entry.copy())
+    return buckets
+
+
+def write_all_feeds(all_entries, now=None):
+    generate_rss_xml(
+        all_entries,
+        LEGACY_OUTPUT_FILE,
+        LEGACY_FEED_TITLE,
+        "全部命中论文订阅",
+        include_quality_label=False,
+    )
+
+    buckets = bucket_entries(all_entries, now=now)
+    for key, definition in FEED_DEFINITIONS.items():
+        generate_rss_xml(
+            buckets[key],
+            definition["path"],
+            definition["title"],
+            definition["description"],
+            include_quality_label=True,
+        )
+
 
 def main():
-    # 请确保这里的调用参数与你目前的 secrets 配置一致
-    rss_urls = load_config('journals.dat', 'RSS_JOURNALS')
-    queries = load_config('keywords.dat', 'RSS_KEYWORDS')
-    
+    rss_urls = load_config("journals.dat", "RSS_JOURNALS")
+    queries = load_config("keywords.dat", "RSS_KEYWORDS")
+
     if not rss_urls or not queries:
         print("Error: Configuration files are empty or missing.")
         return
 
     existing_entries = get_existing_items()
-    seen_ids = set(entry['id'] for entry in existing_entries)
-    
+    seen_ids = {entry["id"] for entry in existing_entries}
     all_entries = existing_entries.copy()
     new_count = 0
 
@@ -223,17 +294,19 @@ def main():
     for url in rss_urls:
         fetched_entries = parse_rss(url)
         for entry in fetched_entries:
-            if entry['id'] in seen_ids:
+            if entry["id"] in seen_ids:
                 continue
-            
-            if match_entry(entry, queries):
-                all_entries.append(entry)
-                seen_ids.add(entry['id'])
-                new_count += 1
-                print(f"Match found: {entry['title'][:50]}...")
+            if not match_entry(entry, queries):
+                continue
+
+            all_entries.append(entry)
+            seen_ids.add(entry["id"])
+            new_count += 1
+            print(f"Match found: {entry['title'][:50]}...")
 
     print(f"Added {new_count} new entries.")
-    generate_rss_xml(all_entries)
+    write_all_feeds(all_entries)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
