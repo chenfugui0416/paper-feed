@@ -46,11 +46,21 @@ class MultiFeedGenerationTest(unittest.TestCase):
                 "AI核心",
                 "AI相关论文订阅",
                 include_quality_label=True,
+                guid_prefix="ai_core",
             )
             content = output_path.read_text(encoding="utf-8")
 
         self.assertIn("<title>AI核心</title>", content)
         self.assertIn("【精选S】", content)
+        self.assertIn("<guid isPermaLink=\"false\">ai_core:paper-1</guid>", content)
+
+    def test_category_feeds_use_distinct_guids_for_zotero(self):
+        legacy_guid = get_RSS.build_guid(self.entry)
+        category_guid = get_RSS.build_guid(self.entry, guid_prefix="hot_now")
+
+        self.assertNotEqual(legacy_guid.guid, category_guid.guid)
+        self.assertEqual(category_guid.guid, "hot_now:paper-1")
+        self.assertFalse(category_guid.isPermaLink)
 
     def test_convert_struct_time_handles_pre_epoch_dates(self):
         struct_time = time.struct_time((1774, 3, 1, 0, 0, 0, 1, 60, 0))

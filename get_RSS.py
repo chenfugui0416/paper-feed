@@ -195,7 +195,15 @@ def normalize_item_source(item):
     return remove_illegal_xml_chars(get_abbr(item["journal"]))
 
 
-def build_rss_items(items, include_quality_label=False):
+def build_guid(item, guid_prefix=None):
+    guid_value = item["id"]
+    if guid_prefix:
+        guid_value = f"{guid_prefix}:{guid_value}"
+        return Guid(guid_value, isPermaLink=False)
+    return Guid(guid_value)
+
+
+def build_rss_items(items, include_quality_label=False, guid_prefix=None):
     rss_items = []
     sorted_items = sorted(items, key=lambda item: item["pub_date"], reverse=True)[:MAX_ITEMS]
 
@@ -205,7 +213,7 @@ def build_rss_items(items, include_quality_label=False):
                 title=normalize_item_title(item, include_quality_label=include_quality_label),
                 link=item["link"],
                 description=remove_illegal_xml_chars(item["summary"]),
-                guid=Guid(item["id"]),
+                guid=build_guid(item, guid_prefix=guid_prefix),
                 pubDate=item["pub_date"],
                 extensions=[DcSource(normalize_item_source(item))],
             )
@@ -219,6 +227,7 @@ def generate_rss_xml(
     feed_title,
     description,
     include_quality_label=False,
+    guid_prefix=None,
 ):
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -229,7 +238,11 @@ def generate_rss_xml(
         description=description,
         language="zh-CN",
         lastBuildDate=datetime.datetime.now(),
-        items=build_rss_items(items, include_quality_label=include_quality_label),
+        items=build_rss_items(
+            items,
+            include_quality_label=include_quality_label,
+            guid_prefix=guid_prefix,
+        ),
     )
 
     output_path.write_text(feed.rss(), encoding="utf-8")
@@ -274,6 +287,7 @@ def write_all_feeds(all_entries, now=None):
             definition["title"],
             definition["description"],
             include_quality_label=True,
+            guid_prefix=key,
         )
 
 
